@@ -35,6 +35,17 @@ img { display: block; max-width: 100%; }
 .icon-link { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
 .action-count { color: var(--gold); font-variant-numeric: tabular-nums; }
 .menu-toggle { display: none; border: 0; background: none; font-size: 23px; cursor: pointer; }
+.global-search-wrap { max-width: 760px; margin: 0 auto; padding: 0 24px 12px; }
+.global-search { position: relative; display: flex; min-height: 42px; border: 1px solid var(--line); background: var(--white); }
+.global-search input { width: 100%; min-width: 0; padding: 0 13px; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 12px; }
+.global-search > button { width: 48px; flex: 0 0 48px; border: 0; background: transparent; cursor: pointer; font-size: 22px; }
+.global-search:focus-within { border-color: var(--gold); }
+.search-suggestions { position: absolute; z-index: 25; top: calc(100% + 1px); right: -1px; left: -1px; max-height: min(65vh, 430px); overflow: auto; border: 1px solid var(--line); background: var(--white); box-shadow: 0 12px 25px rgba(41,37,31,.14); }
+.search-suggestion { width: 100%; padding: 11px 14px; display: flex; justify-content: space-between; gap: 15px; border: 0; border-bottom: 1px solid rgba(41,37,31,.07); background: transparent; text-align: left; cursor: pointer; }
+.search-suggestion:hover, .search-suggestion.is-active { background: var(--paper); }
+.search-suggestion small { color: var(--muted); text-align: right; }
+.search-no-suggestions { margin: 0; padding: 14px; color: var(--muted); font-size: 12px; }
+.clear-search-history { width: 100%; padding: 10px 14px; border: 0; background: var(--paper); color: var(--muted); cursor: pointer; text-align: right; font-size: 11px; }
 .eyebrow { color: var(--gold); font-size: 10px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; }
 .hero { position: relative; min-height: 590px; overflow: hidden; background: #d9c9b8; color: white; }
 .hero-slide { position: absolute; inset: 0; display: flex; align-items: center; visibility: hidden; opacity: 0; transition: opacity .55s ease, visibility .55s ease; }
@@ -99,8 +110,10 @@ img { display: block; max-width: 100%; }
 .product-type, .product-stock { margin: 0; color: var(--muted); font-size: 10px; letter-spacing: .06em; }
 .product-stock { display: inline-block; margin-top: 7px; color: #566a52; }
 .product-stock.is-out-of-stock { color: #9c4541; font-weight: 700; }
+.product-variants { margin: 6px 0 0; color: var(--muted); font-size: 9px; line-height: 1.65; }
 .product-price { margin: 2px 0 0; white-space: nowrap; font-size: 12px; }
 .product-price del { margin-right: 5px; color: var(--muted); font-size: 10px; }
+.discount-label { margin-right: 5px; color: #9c4541; font-size: 9px; font-weight: 700; }
 .promo { max-width: none; padding: 74px 42px; background: #40382e; color: white; text-align: center; }
 .promo h2 { margin: 12px auto; font: 500 clamp(32px,4vw,49px) var(--serif); }
 .promo p { color: #dfd6ca; }
@@ -139,6 +152,13 @@ img { display: block; max-width: 100%; }
 .filter-bar { margin: 20px 0 28px; display: flex; flex-wrap: wrap; gap: 10px; }
 .field, .filter-bar input, .filter-bar select { min-height: 43px; padding: 0 12px; border: 1px solid var(--line); border-radius: 0; background: var(--white); color: var(--ink); }
 .filter-bar input { min-width: min(260px,100%); flex: 1; }
+.catalog-search-row { margin: 22px 0 12px; display: flex; gap: 8px; }
+.catalog-search-row input { min-width: 0; min-height: 46px; padding: 0 13px; flex: 1; border: 1px solid var(--line); background: var(--white); }
+.catalog-filters { margin-top: 12px; }
+.catalog-filters select { flex: 1 1 140px; }
+.catalog-filters .icon-link { min-height: 43px; padding: 0 10px; border: 1px solid var(--line); background: var(--white); font-size: 11px; }
+.catalog-load-more { padding-top: 35px; text-align: center; }
+.no-results-links { display: flex; justify-content: center; flex-wrap: wrap; gap: 15px; }
 .form-card { width: min(100%,560px); margin: 30px auto; padding: clamp(25px,5vw,47px); background: var(--white); border: 1px solid var(--line); }
 .form-card h1 { margin: 7px 0 9px; font: 500 39px var(--serif); }
 .form-card > p { color: var(--muted); line-height: 1.7; }
@@ -209,7 +229,7 @@ img { display: block; max-width: 100%; }
   .primary-nav {
     position: fixed;
     z-index: 30;
-    inset: 112px 24px auto;
+    inset: 126px 24px auto;
     max-height: calc(100vh - 136px);
     padding: 12px 22px;
     display: none;
@@ -236,7 +256,7 @@ img { display: block; max-width: 100%; }
   .header-inner { min-height: 64px; grid-template-columns: 38px 1fr auto; padding: 0 16px; }
   .brand { justify-self: center; font-size: 31px; }
   .menu-toggle { display: block; }
-  .primary-nav { position: fixed; z-index: 30; inset: 98px 0 0; padding: 25px 23px; display: none; flex-direction: column; align-items: stretch; gap: 0; background: var(--paper); font-size: 15px; }
+  .primary-nav { position: fixed; z-index: 30; inset: 118px 0 0; padding: 25px 23px; display: none; flex-direction: column; align-items: stretch; gap: 0; background: var(--paper); font-size: 15px; }
   .primary-nav.is-open { display: flex; }
   .primary-nav a, .primary-nav a:nth-last-child(-n+2) { display: block; padding: 16px 0; border-bottom: 1px solid var(--line); }
   .header-actions { gap: 12px; }
@@ -278,6 +298,12 @@ img { display: block; max-width: 100%; }
   .site-footer { padding: 46px 21px 20px; }
   .footer-bottom { flex-direction: column; }
   .page-shell { padding: 38px 17px 65px; }
+  .global-search-wrap { padding: 0 15px 10px; }
+  .catalog-search-row { align-items: stretch; }
+  .catalog-search-row .button { min-height: 42px; padding: 0 13px; font-size: 10px; }
+  .catalog-filters select, .catalog-filters input { flex-basis: calc(50% - 6px); min-width: 0; }
+  .search-suggestion { align-items: start; flex-direction: column; gap: 3px; }
+  .search-suggestion small { text-align: left; }
   .product-detail, .cart-layout, .checkout-layout { grid-template-columns: 1fr; gap: 22px; }
   .detail-copy { padding-top: 0; }
   .form-grid { grid-template-columns: 1fr; gap: 0; }

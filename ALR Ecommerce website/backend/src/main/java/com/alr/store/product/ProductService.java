@@ -30,7 +30,9 @@ public class ProductService {
         return (includeInactive ? products.findAllByOrderByCreatedAtDesc() : products.findAllByActiveTrueOrderByCreatedAtDesc())
                 .stream()
                 .filter(product -> query == null || query.isBlank()
-                        || (product.getName() + " " + product.getCategory()).toLowerCase(Locale.ROOT)
+                        || (product.getName() + " " + product.getCategory() + " " + product.getBrand()
+                                + " " + product.getSku() + " " + product.getDescription())
+                        .toLowerCase(Locale.ROOT)
                         .contains(query.trim().toLowerCase(Locale.ROOT)))
                 .filter(product -> category == null || category.isBlank()
                         || product.getCategory().equalsIgnoreCase(category.trim()))
@@ -102,6 +104,12 @@ public class ProductService {
         }
         product.setName(request.name().trim());
         product.setCategory(request.category().trim());
+        if (request.brand() != null && !request.brand().isBlank()) {
+            product.setBrand(request.brand().trim());
+        }
+        if (request.sku() != null && !request.sku().isBlank()) {
+            product.setSku(request.sku().trim());
+        }
         product.setPrice(request.price());
         product.setSalePrice(request.salePrice());
         product.setDescription(request.description().trim());

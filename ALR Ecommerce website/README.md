@@ -39,8 +39,8 @@ Automated integration tests use an isolated in-memory H2 database and do not req
 ## Storefront
 
 - `/` — responsive editorial homepage with rotating announcements, an accessible hero carousel, seasonal category edits, best sellers, recent 30-day trends, new arrivals, sale prices, and local browsing/wishlist/order-based shelves. A promotion countdown appears only when its message and UTC end time are configured. Homepage browsing history stays in the current browser; it is not sent to ALR. Reviews remain illustrative samples.
-- `/pages/products.html` — search, category/size/colour/price/availability filters, and featured, newest, price, or sales-based sorting.
-- `/pages/product-details.html?id=...` — product gallery, options, related pieces, and stock-aware add to bag.
+- `/pages/products.html` — shared autocomplete with recent searches, plus catalog search across product name, category, brand, description, and SKU; filter by category, brand, size, colour, price, minimum discount, availability, or recent arrivals; sort by relevance, date, price, popularity, or discount; load more results as needed.
+- `/pages/product-details.html?id=...` — product gallery, brand/SKU, size and colour options, accurate sale discount, related pieces, and stock-aware add to bag.
 - `/pages/cart.html` — browser-persisted cart, quantity controls, shipping, and totals.
 - `/pages/wishlist.html` — local wishlist while signed out; account-synced wishlist when signed in.
 - `/pages/login.html` and `/pages/register.html` — secure API authentication.
@@ -48,7 +48,7 @@ Automated integration tests use an isolated in-memory H2 database and do not req
 - `/pages/orders.html` — signed-in order history.
 - `/pages/admin.html` — protected product, stock, multi-image gallery, order, and customer management.
 
-Admins can mark an in-stock item out of stock from the product table. This sets its database stock to zero; customers immediately see an “Out of stock” label, and purchase controls are disabled. Admins can restore availability by editing the product stock.
+Admins can manage product brand and SKU along with the catalogue fields, and mark an in-stock item out of stock from the product table. This sets its database stock to zero; customers immediately see an “Out of stock” label, and purchase controls are disabled. Admins can restore availability by editing the product stock. The admin dashboard lists sales totals by India Standard Time order date and lets admins sort orders by date or order total. Cancelled orders are excluded from sales totals.
 
 ## API outline
 
@@ -64,4 +64,4 @@ Orders recalculate prices and shipping on the server, lock inventory while placi
 
 The seeded catalogue, photography links, and homepage reviews are demonstration content. Product photography requires an internet connection. Email delivery, a real payment gateway, and deployment-specific HTTPS/secrets still need configuring before production use.
 
-The advanced storefront brief is being delivered in phases. Phase 1 covers the homepage; notification delivery, designer metadata, and other later-phase features are not represented as working integrations yet.
+The advanced storefront brief is being delivered in phases. The homepage and search/catalog browsing are implemented. Payment gateways, delivery tracking integrations, email/notification delivery, customer reviews and Q&A, and other later-phase features are not represented as working integrations yet.

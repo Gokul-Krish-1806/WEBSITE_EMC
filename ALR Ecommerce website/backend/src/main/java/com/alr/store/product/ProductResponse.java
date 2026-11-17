@@ -8,6 +8,8 @@ public record ProductResponse(
         String id,
         String name,
         String category,
+        String brand,
+        String sku,
         BigDecimal price,
         BigDecimal salePrice,
         String description,
@@ -26,7 +28,8 @@ public record ProductResponse(
 
     public static ProductResponse from(Product product, long salesCount) {
         return new ProductResponse(product.getId(), product.getName(), product.getCategory(),
-                product.getPrice(), product.getSalePrice(), product.getDescription(), product.getImageUrl(),
+                product.getBrand(), product.getSku(), product.getPrice(), product.getSalePrice(),
+                product.getDescription(), product.getImageUrl(),
                 product.getGalleryImages(), product.getSizes(), product.getColors(), product.getStock(), product.isActive(),
                 product.getBadge(), product.getCreatedAt(), salesCount);
     }

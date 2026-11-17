@@ -4,6 +4,7 @@ const WISHLIST_KEY = "alr-store-wishlist";
 const TOKEN_KEY = "alr-access-token";
 const USER_KEY = "alr-current-user";
 const VIEW_HISTORY_KEY = "alr-product-view-history";
+const SEARCH_HISTORY_KEY = "alr-product-search-history";
 const FREE_SHIPPING = 4999;
 const SHIPPING_FEE = 149;
 const money = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
@@ -15,6 +16,7 @@ let activeToast;
 let announcementTimer;
 let heroTimer;
 let promotionTimer;
+let visibleProductCount = 12;
 
 function stored(key, fallback, validate) {
   const raw = localStorage.getItem(key);
@@ -43,6 +45,25 @@ function productViewHistory() {
   return stored(VIEW_HISTORY_KEY, [], value => Array.isArray(value) && value.every(entry =>
     entry && typeof entry.id === "string" && Number.isInteger(entry.views) && entry.views > 0
     && typeof entry.lastViewedAt === "number"));
+}
+
+function searchHistory() {
+  return stored(SEARCH_HISTORY_KEY, [], value =>
+    Array.isArray(value) && value.every(query => typeof query === "string"));
+}
+
+function rememberSearch(query) {
+  const normalized = query.trim().replace(/\s+/g, " ");
+  if (!normalized) return;
+  const next = [normalized, ...searchHistory().filter(item => item.toLowerCase() !== normalized.toLowerCase())].slice(0, 8);
+  localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next));
+}
+
+function submitSearch(query) {
+  const normalized = query.trim();
+  if (!normalized) return;
+  rememberSearch(normalized);
+  location.href = `/pages/products.html?q=${encodeURIComponent(normalized)}`;
 }
 
 function rememberProductView(productId) {
@@ -104,6 +125,14 @@ function price(product) {
   return Number(product.salePrice || product.price);
 }
 
+function productBrand(product) {
+  return product.brand?.trim() || "ALR Studio";
+}
+
+function productSku(product) {
+  return product.sku?.trim() || "";
+}
+
 function user() {
   try { return JSON.parse(sessionStorage.getItem(USER_KEY) || "null"); }
   catch (error) {
@@ -149,7 +178,47 @@ function headerMarkup() {
         <a class="icon-link" href="/pages/wishlist.html" aria-label="Wishlist">♡ <span id="wishlist-count">${token() ? accountWishlist.size : wishlistIds().length}</span></a>
         <a class="icon-link" href="/pages/cart.html" aria-label="Shopping bag">Bag <span id="cart-count">${count}</span></a>
       </div>
-    </div></header>`;
+    </div><div class="global-search-wrap"><form class="global-search" id="global-search" role="search"><label class="sr-only" for="global-search-input">Search products by name, category, brand, or SKU</label><input id="global-search-input" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="global-search-suggestions" placeholder="Search fashion, categories, brands or SKU…" autocomplete="off"><button type="submit" aria-label="Search">⌕</button><div class="search-suggestions" id="global-search-suggestions" hidden><div id="global-search-suggestion-options" role="listbox"></div><button class="clear-search-history" type="button" data-action="clear-search-history" hidden>Clear recent searches</button></div></form></div></header>`;
+}
+
+function updateSearchSuggestions(query = "") {
+  const input = document.getElementById("global-search-input");
+  const panel = document.getElementById("global-search-suggestions");
+  const options = document.getElementById("global-search-suggestion-options");
+  const clearButton = document.querySelector(".clear-search-history");
+  if (!input || !panel || !options) return;
+  const normalized = query.trim().toLowerCase();
+  const matches = normalized
+    ? products.filter(product => [product.name, product.category, product.brand, product.sku,
+      product.description, product.badge].some(value => String(value || "").toLowerCase().includes(normalized)))
+      .slice(0, 6)
+    : [];
+  const recent = normalized ? [] : searchHistory().slice(0, 5);
+  const popular = normalized ? [] : [...new Set(products.map(product => product.category))].slice(0, 5);
+  const rows = [
+    ...matches.map(product => ({ label: product.name, detail: [productBrand(product), product.category, productSku(product)].filter(Boolean).join(" · "), query: product.name })),
+    ...recent.map(item => ({ label: item, detail: "Recent search", query: item })),
+    ...popular.map(item => ({ label: item, detail: "Popular category", query: item }))
+  ];
+  options.innerHTML = rows.length
+    ? rows.map((row, index) => `<button class="search-suggestion" type="button" role="option" id="search-option-${index}" data-action="search-suggestion" data-query="${escapeHtml(row.query)}"><span>${escapeHtml(row.label)}</span><small>${escapeHtml(row.detail)}</small></button>`).join("")
+    : normalized
+      ? `<p class="search-no-suggestions">No quick matches. Press Enter to see search results.</p>`
+      : `<p class="search-no-suggestions">Search products, categories, brands, or SKU.</p>`;
+  if (clearButton) clearButton.hidden = recent.length === 0;
+  panel.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+  input.removeAttribute("aria-activedescendant");
+}
+
+function closeSearchSuggestions() {
+  const input = document.getElementById("global-search-input");
+  const panel = document.getElementById("global-search-suggestions");
+  if (panel) panel.hidden = true;
+  if (input) {
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+  }
 }
 
 function footerMarkup() {
@@ -170,8 +239,8 @@ function productCard(product) {
     <button class="heart-button" type="button" data-action="wishlist" data-id="${escapeHtml(product.id)}" aria-label="Toggle ${escapeHtml(product.name)} wishlist" aria-pressed="${wished}">♡</button>
     <div class="product-actions"><button type="button" data-action="details" data-id="${escapeHtml(product.id)}">Quick view</button><button type="button" data-action="details" data-id="${escapeHtml(product.id)}">Choose options</button></div>
   </div><div class="product-meta"><div><h3 class="product-name"><a href="/pages/product-details.html?id=${encodeURIComponent(product.id)}">${escapeHtml(product.name)}</a></h3>
-    <p class="product-type">${escapeHtml(product.category)}</p><span class="product-stock${outOfStock ? " is-out-of-stock" : ""}">${outOfStock ? "Out of stock" : `${product.stock} ready to ship`}</span></div>
-    <p class="product-price">${product.salePrice ? `<del>${money.format(product.price)}</del>` : ""}${money.format(price(product))}</p></div></article>`;
+    <p class="product-type">${escapeHtml(productBrand(product))} · ${escapeHtml(product.category)}</p><span class="product-stock${outOfStock ? " is-out-of-stock" : ""}">${outOfStock ? "Out of stock" : `${product.stock} ready to ship`}</span><p class="product-variants">${productSku(product) ? `SKU: ${escapeHtml(productSku(product))}<br>` : ""}Sizes: ${escapeHtml(product.sizes.join(", "))}<br>Colours: ${escapeHtml(product.colors.join(", "))}</p></div>
+    <p class="product-price">${product.salePrice ? `<del>${money.format(product.price)}</del><span class="discount-label">${Math.round((1 - Number(product.salePrice) / Number(product.price)) * 100)}% off</span>` : ""}${money.format(price(product))}</p></div></article>`;
 }
 
 function sectionTitle(label, title, link = "/pages/products.html") {
@@ -357,13 +426,16 @@ function renderProducts() {
   const category = new URLSearchParams(location.search).get("category") || "";
   const query = new URLSearchParams(location.search).get("q") || "";
   const requestedSort = new URLSearchParams(location.search).get("sort") || "";
-  const sort = ["featured", "newest", "low", "high", "best-selling"].includes(requestedSort)
-    ? requestedSort : "featured";
+  const sort = ["relevance", "newest", "low", "high", "popular", "discount"].includes(requestedSort)
+    ? requestedSort : "relevance";
   const categories = [...new Set(products.map(product => product.category))].sort();
+  const brands = [...new Set(products.map(productBrand))].sort();
   const colors = [...new Set(products.flatMap(product => product.colors))].sort();
+  const selectedBrand = new URLSearchParams(location.search).get("brand") || "";
   return `<section class="page-shell"><p class="breadcrumb"><a href="/">Home</a> / The collection</p><div class="page-heading"><span class="eyebrow">Considered pieces, made to be worn</span><h1>Shop the collection</h1><p>Discover the pieces that make every day feel a little more like your own.</p></div>
-    <div class="filter-bar"><label class="sr-only" for="search-products">Search products</label><input id="search-products" type="search" placeholder="Search by name or category…" value="${escapeHtml(query)}"><select id="filter-category" aria-label="Category"><option value="">All categories</option>${categories.map(item => `<option value="${escapeHtml(item)}" ${item.toLowerCase() === category.toLowerCase() ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}</select><select id="filter-size" aria-label="Size"><option value="">All sizes</option>${["XS", "S", "M", "L", "XL", "XXL", "Free size", "One size"].map(size => `<option>${size}</option>`).join("")}</select><select id="filter-color" aria-label="Colour"><option value="">All colours</option>${colors.map(color => `<option value="${escapeHtml(color)}">${escapeHtml(color)}</option>`).join("")}</select><input id="filter-price-min" type="number" min="0" placeholder="Min ₹" aria-label="Minimum price"><input id="filter-price-max" type="number" min="0" placeholder="Max ₹" aria-label="Maximum price"><select id="sort-products" aria-label="Sort products"><option value="featured" ${sort === "featured" ? "selected" : ""}>Featured</option><option value="newest" ${sort === "newest" ? "selected" : ""}>Newest</option><option value="low" ${sort === "low" ? "selected" : ""}>Price: low to high</option><option value="high" ${sort === "high" ? "selected" : ""}>Price: high to low</option><option value="best-selling" ${sort === "best-selling" ? "selected" : ""}>Best selling</option></select><label class="icon-link"><input id="filter-available" type="checkbox"> In stock</label></div>
-    <p id="products-count" class="form-help"></p><div class="product-grid" id="products-grid"></div></section>`;
+    <div class="catalog-search-row"><label class="sr-only" for="search-products">Search by product, category, brand, or SKU</label><input id="search-products" type="search" placeholder="Search products, categories, brands or SKU…" value="${escapeHtml(query)}"><button class="button button-dark" type="button" data-action="apply-catalog-search">Search</button></div>
+    <div class="filter-bar catalog-filters"><select id="filter-category" aria-label="Category"><option value="">All categories</option>${categories.map(item => `<option value="${escapeHtml(item)}" ${item.toLowerCase() === category.toLowerCase() ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}</select><select id="filter-brand" aria-label="Brand"><option value="">All brands</option>${brands.map(item => `<option value="${escapeHtml(item)}" ${item.toLowerCase() === selectedBrand.toLowerCase() ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}</select><select id="filter-size" aria-label="Size"><option value="">All sizes</option>${["XS", "S", "M", "L", "XL", "XXL", "Free size", "One size"].map(size => `<option>${size}</option>`).join("")}</select><select id="filter-color" aria-label="Colour"><option value="">All colours</option>${colors.map(color => `<option value="${escapeHtml(color)}">${escapeHtml(color)}</option>`).join("")}</select><input id="filter-price-min" type="number" min="0" placeholder="Min ₹" aria-label="Minimum price"><input id="filter-price-max" type="number" min="0" placeholder="Max ₹" aria-label="Maximum price"><select id="filter-discount" aria-label="Minimum discount"><option value="0">Any discount</option><option value="10">10% off or more</option><option value="20">20% off or more</option><option value="30">30% off or more</option><option value="50">50% off or more</option></select><select id="sort-products" aria-label="Sort products"><option value="relevance" ${sort === "relevance" ? "selected" : ""}>Relevance</option><option value="newest" ${sort === "newest" ? "selected" : ""}>Newest first</option><option value="low" ${sort === "low" ? "selected" : ""}>Price: low to high</option><option value="high" ${sort === "high" ? "selected" : ""}>Price: high to low</option><option value="popular" ${sort === "popular" ? "selected" : ""}>Popularity</option><option value="discount" ${sort === "discount" ? "selected" : ""}>Biggest discount</option></select><label class="icon-link"><input id="filter-available" type="checkbox"> In stock</label><label class="icon-link"><input id="filter-new-arrivals" type="checkbox"> New arrivals</label></div>
+    <p id="products-count" class="form-help" aria-live="polite"></p><div class="product-grid" id="products-grid"></div><div class="catalog-load-more" id="catalog-load-more"></div></section>`;
 }
 
 function renderProductGrid(list, container = document.getElementById("products-grid")) {
@@ -371,29 +443,60 @@ function renderProductGrid(list, container = document.getElementById("products-g
   container.innerHTML = list.length ? list.map(productCard).join("") : `<div class="empty-state"><h2>No pieces found</h2><p>Try changing your filters to see more of the collection.</p></div>`;
 }
 
-function applyProductFilters() {
+function applyProductFilters(resetPagination = true) {
+  if (resetPagination) visibleProductCount = 12;
   const query = document.getElementById("search-products")?.value.trim().toLowerCase() || "";
   const category = document.getElementById("filter-category")?.value || "";
+  const brand = document.getElementById("filter-brand")?.value || "";
   const size = document.getElementById("filter-size")?.value || "";
   const color = document.getElementById("filter-color")?.value || "";
   const minPrice = Number(document.getElementById("filter-price-min")?.value || 0);
   const maxPrice = Number(document.getElementById("filter-price-max")?.value || Infinity);
+  const minimumDiscount = Number(document.getElementById("filter-discount")?.value || 0);
   const available = document.getElementById("filter-available")?.checked || false;
+  const newArrivals = document.getElementById("filter-new-arrivals")?.checked || false;
   const sort = document.getElementById("sort-products")?.value || "featured";
+  const newestThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000;
   let matches = products.filter(product =>
-    `${product.name} ${product.category}`.toLowerCase().includes(query) &&
+    `${product.name} ${product.category} ${productBrand(product)} ${productSku(product)} ${product.description}`.toLowerCase().includes(query) &&
     (!category || product.category === category) &&
+    (!brand || productBrand(product) === brand) &&
     (!size || product.sizes.includes(size)) &&
     (!color || product.colors.includes(color)) &&
     price(product) >= minPrice && price(product) <= maxPrice &&
-    (!available || product.stock > 0));
+    (!minimumDiscount || (product.salePrice && Math.round((1 - Number(product.salePrice) / Number(product.price)) * 100) >= minimumDiscount)) &&
+    (!available || product.stock > 0) &&
+    (!newArrivals || new Date(product.createdAt).getTime() >= newestThreshold));
   if (sort === "low") matches.sort((a, b) => price(a) - price(b));
   if (sort === "high") matches.sort((a, b) => price(b) - price(a));
   if (sort === "newest") matches.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  if (sort === "best-selling") matches.sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0));
+  if (sort === "popular") matches.sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0));
+  if (sort === "discount") matches.sort((a, b) =>
+    (b.salePrice ? 1 - Number(b.salePrice) / Number(b.price) : 0)
+      - (a.salePrice ? 1 - Number(a.salePrice) / Number(a.price) : 0));
+  if (sort === "relevance" && query) {
+    matches.sort((a, b) => {
+      const score = product => product.name.toLowerCase().startsWith(query) ? 3
+        : product.name.toLowerCase().includes(query) ? 2
+          : `${product.category} ${productBrand(product)} ${productSku(product)}`.toLowerCase().includes(query) ? 1 : 0;
+      return score(b) - score(a) || (b.salesCount || 0) - (a.salesCount || 0);
+    });
+  }
   const count = document.getElementById("products-count");
-  if (count) count.textContent = `${matches.length} ${matches.length === 1 ? "piece" : "pieces"}`;
-  renderProductGrid(matches);
+  if (count) count.textContent = `${matches.length} ${matches.length === 1 ? "piece" : "pieces"} found`;
+  const grid = document.getElementById("products-grid");
+  if (grid) {
+    if (!matches.length) {
+      const categories = [...new Set(products.map(product => product.category))].slice(0, 5);
+      grid.innerHTML = `<div class="empty-state"><h2>No pieces found</h2><p>Try a different search or explore a category.</p><div class="no-results-links">${categories.map(item => `<a class="text-link" href="/pages/products.html?category=${encodeURIComponent(item)}">${escapeHtml(item)}</a>`).join("")}</div></div>`;
+    } else {
+      grid.innerHTML = matches.slice(0, visibleProductCount).map(productCard).join("");
+    }
+  }
+  const loadMore = document.getElementById("catalog-load-more");
+  if (loadMore) loadMore.innerHTML = matches.length > visibleProductCount
+    ? `<button class="button button-outline" type="button" data-action="load-more-products">Load more (${matches.length - visibleProductCount} remaining)</button>`
+    : "";
 }
 
 function renderDetail(product) {
@@ -404,7 +507,7 @@ function renderDetail(product) {
   const thumbnails = gallery.length > 1 ? `<div class="detail-thumbnails">${gallery.map((image, index) => `<button type="button" data-action="select-image" data-image="${escapeHtml(image)}" aria-label="View product image ${index + 1}"><img src="${escapeHtml(image)}" alt=""></button>`).join("")}</div>` : "";
   return `<section class="page-shell"><p class="breadcrumb"><a href="/">Home</a> / <a href="/pages/products.html">The collection</a> / ${escapeHtml(product.name)}</p><div class="product-detail">
     <div><img class="detail-image" id="detail-main-image" src="${escapeHtml(product.imageUrl)}" alt="${escapeHtml(product.name)}">${thumbnails}</div>
-    <div class="detail-copy"><span class="eyebrow">${escapeHtml(product.category)}</span><h1>${escapeHtml(product.name)}</h1><p class="detail-price">${product.salePrice ? `<del>${money.format(product.price)}</del> ` : ""}${money.format(price(product))}</p><p>${escapeHtml(product.description)}</p><p class="product-stock${product.stock <= 0 ? " is-out-of-stock" : ""}">${product.stock > 0 ? `${product.stock} ready to ship` : "Out of stock"}</p>${options}
+    <div class="detail-copy"><span class="eyebrow">${escapeHtml(productBrand(product))} · ${escapeHtml(product.category)}</span><h1>${escapeHtml(product.name)}</h1>${productSku(product) ? `<p class="product-type">SKU: ${escapeHtml(productSku(product))}</p>` : ""}<p class="detail-price">${product.salePrice ? `<del>${money.format(product.price)}</del> <span class="discount-label">${Math.round((1 - Number(product.salePrice) / Number(product.price)) * 100)}% off</span>` : ""}${money.format(price(product))}</p><p>${escapeHtml(product.description)}</p><p class="product-stock${product.stock <= 0 ? " is-out-of-stock" : ""}">${product.stock > 0 ? `${product.stock} ready to ship` : "Out of stock"}</p>${options}
       <div class="choice-row"><label for="detail-quantity">Quantity</label><input class="field quantity-input" id="detail-quantity" type="number" min="1" max="${Math.max(1, product.stock)}" value="1"></div>
       <div class="button-row"><button class="button button-dark" type="button" data-action="add-cart" data-id="${escapeHtml(product.id)}" ${product.stock <= 0 ? "disabled" : ""}>Add to bag</button><button class="button button-outline" type="button" data-action="buy-now" data-id="${escapeHtml(product.id)}" ${product.stock <= 0 ? "disabled" : ""}>Buy now</button><button class="button button-outline" type="button" data-action="wishlist" data-id="${escapeHtml(product.id)}">♡ Save</button></div>
       <div class="admin-section"><h2>A little more</h2><p>${escapeHtml(product.description)}</p><p>Made with care. Follow the care label for the fabric. Complimentary shipping over ₹4,999. Cash on delivery available.</p><details><summary>Size guide</summary><p>Choose your usual size for a comfortable fit. Sarees and one-size accessories are labelled accordingly.</p></details><details><summary>Shipping and returns</summary><p>Complimentary shipping over ₹4,999. Eligible unworn items can be returned within 7 days of delivery.</p></details></div></div></div></section>
@@ -496,15 +599,54 @@ function renderOrderHistory(list) {
   host.innerHTML = list.length ? list.map(orderCard).join("") : `<div class="empty-state"><h2>No orders yet</h2><p>Your next favourite is waiting in the collection.</p><a class="button button-dark" href="/pages/products.html">Explore pieces →</a></div>`;
 }
 
+function indiaDateKey(value) {
+  if (!value) return "Unknown date";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(new Date(value));
+  const dateParts = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+}
+
+function dailySalesRows(orderList) {
+  const totals = new Map();
+  for (const order of orderList) {
+    if (order.status === "CANCELLED") continue;
+    const date = indiaDateKey(order.createdAt);
+    const entry = totals.get(date) || { date, orders: 0, sales: 0 };
+    entry.orders += 1;
+    entry.sales += Number(order.total);
+    totals.set(date, entry);
+  }
+  return [...totals.values()].sort((a, b) => b.date.localeCompare(a.date));
+}
+
+function renderAdminOrderRows(orderList, sort = "date-newest") {
+  const sortedOrders = [...orderList];
+  if (sort === "date-oldest") {
+    sortedOrders.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  } else if (sort === "total-high") {
+    sortedOrders.sort((a, b) => Number(b.total) - Number(a.total));
+  } else if (sort === "total-low") {
+    sortedOrders.sort((a, b) => Number(a.total) - Number(b.total));
+  } else {
+    sortedOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }
+  const nextStatuses = { PLACED: ["PLACED", "CONFIRMED", "CANCELLED"], CONFIRMED: ["CONFIRMED", "SHIPPED", "CANCELLED"], SHIPPED: ["SHIPPED", "DELIVERED"], DELIVERED: ["DELIVERED"], CANCELLED: ["CANCELLED"] };
+  return sortedOrders.map(order => `<tr><td>${escapeHtml(order.orderNumber)}</td><td>${escapeHtml(order.customerName)}<br>${escapeHtml(order.customerEmail)}</td><td>${escapeHtml(order.createdAt ? new Date(order.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—")}</td><td>${money.format(order.total)}</td><td>${escapeHtml(order.status)}</td><td><select class="field" data-order-status="${order.id}">${(nextStatuses[order.status] || [order.status]).map(status => `<option ${status === order.status ? "selected" : ""}>${status}</option>`).join("")}</select><button class="text-button" type="button" data-action="update-order" data-id="${order.id}">Update</button></td></tr>`).join("");
+}
+
 function adminMarkup(productList, orderList, stats, customerList) {
   const productRows = productList.map(product => `<tr><td><img src="${escapeHtml(product.imageUrl)}" alt=""></td><td>${escapeHtml(product.name)}</td><td>${escapeHtml(product.category)}</td><td>${money.format(product.price)}</td><td>${product.stock > 0 ? product.stock : "Out of stock"}</td><td><button class="button button-outline" type="button" data-action="edit-product" data-id="${escapeHtml(product.id)}">Edit</button> ${product.stock > 0 ? `<button class="text-button" type="button" data-action="mark-out-of-stock" data-id="${escapeHtml(product.id)}">Mark out of stock</button>` : ""} <button class="text-button" type="button" data-action="delete-product" data-id="${escapeHtml(product.id)}">Remove</button></td></tr>`).join("");
-  const nextStatuses = { PLACED: ["PLACED", "CONFIRMED", "CANCELLED"], CONFIRMED: ["CONFIRMED", "SHIPPED", "CANCELLED"], SHIPPED: ["SHIPPED", "DELIVERED"], DELIVERED: ["DELIVERED"], CANCELLED: ["CANCELLED"] };
-  const orderRows = orderList.map(order => `<tr><td>${escapeHtml(order.orderNumber)}</td><td>${escapeHtml(order.customerName)}<br>${escapeHtml(order.customerEmail)}</td><td>${money.format(order.total)}</td><td>${escapeHtml(order.status)}</td><td><select class="field" data-order-status="${order.id}">${(nextStatuses[order.status] || [order.status]).map(status => `<option ${status === order.status ? "selected" : ""}>${status}</option>`).join("")}</select><button class="text-button" type="button" data-action="update-order" data-id="${order.id}">Update</button></td></tr>`).join("");
+  const orderRows = renderAdminOrderRows(orderList);
+  const dailyRows = dailySalesRows(orderList).map(day => `<tr><td>${escapeHtml(new Date(`${day.date}T00:00:00+05:30`).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium" }))}</td><td>${day.orders}</td><td>${money.format(day.sales)}</td></tr>`).join("");
   const customerRows = customerList.map(customer => `<tr><td>${escapeHtml(customer.name)}</td><td>${escapeHtml(customer.email)}</td><td>${escapeHtml(customer.phone || "—")}</td><td>${customer.orderCount}</td><td><button class="text-button" type="button" data-action="customer-history" data-id="${customer.id}">View history</button></td></tr>`).join("");
-  return `<div class="admin-section"><div class="section-heading"><div><span class="eyebrow">Overview</span><h2>Store at a glance</h2></div><button class="button button-outline" type="button" data-action="logout">Sign out</button></div><div class="reviews"><div class="review"><span class="eyebrow">Products</span><h2>${stats.products}</h2></div><div class="review"><span class="eyebrow">Orders</span><h2>${stats.orders}</h2></div><div class="review"><span class="eyebrow">Customers</span><h2>${stats.customers}</h2></div><div class="review"><span class="eyebrow">Sales</span><h2>${money.format(stats.sales)}</h2></div></div></div>
+  return `<div class="admin-section"><div class="section-heading"><div><span class="eyebrow">Overview</span><h2>Store at a glance</h2></div><button class="button button-outline" type="button" data-action="logout">Sign out</button></div><div class="reviews"><div class="review"><span class="eyebrow">Products</span><h2>${stats.products}</h2></div><div class="review"><span class="eyebrow">Orders</span><h2>${stats.orders}</h2></div><div class="review"><span class="eyebrow">Customers</span><h2>${stats.customers}</h2></div><div class="review"><span class="eyebrow">Total sales</span><h2>${money.format(stats.sales)}</h2></div></div></div>
     <div class="admin-section"><h2 id="product-form-title">Add a product</h2><form id="admin-product-form"><input type="hidden" name="id" id="admin-id"><div class="form-grid">
       <div class="form-field"><label for="admin-name">Product name</label><input id="admin-name" name="name" required maxlength="180"></div>
       <div class="form-field"><label for="admin-category">Category</label><input id="admin-category" name="category" required maxlength="80"></div>
+      <div class="form-field"><label for="admin-brand">Brand</label><input id="admin-brand" name="brand" maxlength="100" placeholder="ALR Studio"></div>
+      <div class="form-field"><label for="admin-sku">SKU</label><input id="admin-sku" name="sku" maxlength="100" placeholder="Auto-generated if blank"></div>
       <div class="form-field"><label for="admin-price">Price (₹)</label><input id="admin-price" name="price" type="number" min="0.01" step="0.01" required></div>
       <div class="form-field"><label for="admin-sale">Sale price (₹, optional)</label><input id="admin-sale" name="salePrice" type="number" min="0.01" step="0.01"></div>
       <div class="form-field"><label for="admin-stock">Stock</label><input id="admin-stock" name="stock" type="number" min="0" required value="12"></div>
@@ -517,7 +659,8 @@ function adminMarkup(productList, orderList, stats, customerList) {
       <div class="form-field full"><label for="admin-file">Or upload images (PNG/JPG/WebP, max 300 KB each)</label><input id="admin-file" name="file" type="file" accept="image/png,image/jpeg,image/webp" multiple></div>
     </div><p class="form-error" id="admin-error" role="alert"></p><button class="button button-dark" type="submit">Save product</button> <button class="button button-outline" type="reset">Clear form</button></form></div>
     <div class="admin-section"><h2>Products</h2><div class="table-wrap"><table class="admin-table"><thead><tr><th>Image</th><th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th>Actions</th></tr></thead><tbody>${productRows}</tbody></table></div></div>
-    <div class="admin-section"><h2>Orders</h2><div class="table-wrap"><table class="admin-table"><thead><tr><th>Order</th><th>Customer</th><th>Total</th><th>Status</th><th>Update</th></tr></thead><tbody>${orderRows || `<tr><td colspan="5">No orders yet.</td></tr>`}</tbody></table></div></div>
+    <div class="admin-section"><h2>Daily sales</h2><p class="form-help">Sales are grouped by order date in India Standard Time. Cancelled orders are excluded.</p><div class="table-wrap"><table class="admin-table"><thead><tr><th>Date (IST)</th><th>Orders</th><th>Total sales</th></tr></thead><tbody>${dailyRows || `<tr><td colspan="3">No sales yet.</td></tr>`}</tbody></table></div></div>
+    <div class="admin-section"><div class="section-heading"><h2>Orders</h2><label class="icon-link" for="admin-order-sort">Sort by <select id="admin-order-sort" class="field"><option value="date-newest">Newest date</option><option value="date-oldest">Oldest date</option><option value="total-high">Highest total</option><option value="total-low">Lowest total</option></select></label></div><div class="table-wrap"><table class="admin-table"><thead><tr><th>Order</th><th>Customer</th><th>Date (IST)</th><th>Total</th><th>Status</th><th>Update</th></tr></thead><tbody id="admin-order-rows">${orderRows || `<tr><td colspan="6">No orders yet.</td></tr>`}</tbody></table></div></div>
     <div class="admin-section"><h2>Customers</h2><form id="customer-search" class="filter-bar"><label class="sr-only" for="customer-query">Search customers</label><input id="customer-query" name="q" type="search" placeholder="Search by name, email or phone"><button class="button button-outline" type="submit">Search</button></form><div class="table-wrap"><table class="admin-table"><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Orders</th><th>History</th></tr></thead><tbody id="customer-rows">${customerRows || `<tr><td colspan="5">No customers found.</td></tr>`}</tbody></table></div><div id="customer-history"></div></div>`;
 }
 
@@ -656,6 +799,18 @@ async function handleClick(event) {
   const action = button.dataset.action;
   const product = products.find(item => item.id === button.dataset.id);
   try {
+    if (action === "search-suggestion") submitSearch(button.dataset.query || "");
+    if (action === "clear-search-history") {
+      localStorage.removeItem(SEARCH_HISTORY_KEY);
+      updateSearchSuggestions(document.getElementById("global-search-input")?.value || "");
+    }
+    if (action === "load-more-products") {
+      visibleProductCount += 12;
+      applyProductFilters(false);
+    }
+    if (action === "apply-catalog-search") {
+      submitSearch(document.getElementById("search-products")?.value || "");
+    }
     if (action === "select-image") {
       const mainImage = document.getElementById("detail-main-image");
       if (mainImage) mainImage.src = button.dataset.image;
@@ -696,7 +851,7 @@ async function handleClick(event) {
     if (action === "edit-product" && product) {
       const form = document.getElementById("admin-product-form");
       for (const [key, value] of Object.entries({
-        id: product.id, name: product.name, category: product.category, price: product.price,
+        id: product.id, name: product.name, category: product.category, brand: product.brand, sku: product.sku, price: product.price,
         salePrice: product.salePrice ?? "", stock: product.stock, badge: product.badge,
         description: product.description, sizes: product.sizes.join(", "),
         colors: product.colors.join(", "), imageUrl: product.imageUrl,
@@ -740,6 +895,11 @@ async function handleClick(event) {
 async function handleSubmit(event) {
   const form = event.target;
   if (!(form instanceof HTMLFormElement)) return;
+  if (form.id === "global-search") {
+    event.preventDefault();
+    submitSearch(document.getElementById("global-search-input")?.value || "");
+    return;
+  }
   event.preventDefault();
   try {
     if (form.id === "newsletter-form") {
@@ -806,6 +966,7 @@ async function handleSubmit(event) {
       const sale = form.elements.salePrice.value;
       const body = {
         name: form.elements.name.value.trim(), category: form.elements.category.value.trim(),
+        brand: form.elements.brand.value.trim(), sku: form.elements.sku.value.trim(),
         price: Number(form.elements.price.value), salePrice: sale ? Number(sale) : null,
         stock: Number(form.elements.stock.value), badge: form.elements.badge.value.trim(),
         description: form.elements.description.value.trim(), imageUrl,
@@ -834,10 +995,16 @@ function errorElement(error) {
 document.addEventListener("click", event => { handleClick(event); });
 document.addEventListener("submit", event => { handleSubmit(event); });
 document.addEventListener("input", event => {
+  if (event.target.id === "global-search-input") updateSearchSuggestions(event.target.value);
   if (["search-products", "filter-price-min", "filter-price-max"].includes(event.target.id)) applyProductFilters();
 });
 document.addEventListener("change", event => {
-  if (["filter-category", "filter-size", "filter-color", "sort-products", "filter-available"].includes(event.target.id)) applyProductFilters();
+  if (["filter-category", "filter-brand", "filter-size", "filter-color", "filter-discount", "sort-products", "filter-available", "filter-new-arrivals"].includes(event.target.id)) applyProductFilters();
+  if (event.target.id === "admin-order-sort") {
+    const host = document.getElementById("admin-order-rows");
+    if (host) host.innerHTML = renderAdminOrderRows(orders, event.target.value)
+      || `<tr><td colspan="6">No orders yet.</td></tr>`;
+  }
 });
 document.querySelector("#site-header").innerHTML = headerMarkup();
 document.querySelector("#site-footer").innerHTML = footerMarkup();
@@ -852,14 +1019,48 @@ document.addEventListener("keydown", event => {
     document.getElementById("primary-nav").classList.remove("is-open");
     document.body.classList.remove("menu-open");
     document.querySelector(".menu-toggle").setAttribute("aria-expanded", "false");
+    closeSearchSuggestions();
+  }
+  if (event.target.id === "global-search-input" && ["ArrowDown", "ArrowUp"].includes(event.key)) {
+    const options = [...document.querySelectorAll(".search-suggestion")];
+    if (!options.length) return;
+    event.preventDefault();
+    const activeId = event.target.getAttribute("aria-activedescendant");
+    const currentIndex = options.findIndex(option => option.id === activeId);
+    const nextIndex = event.key === "ArrowDown"
+      ? (currentIndex + 1) % options.length
+      : (currentIndex - 1 + options.length) % options.length;
+    options.forEach(option => option.classList.toggle("is-active", option === options[nextIndex]));
+    event.target.setAttribute("aria-activedescendant", options[nextIndex].id);
+  }
+  if (event.target.id === "global-search-input" && event.key === "Enter") {
+    const activeId = event.target.getAttribute("aria-activedescendant");
+    const selected = activeId && document.getElementById(activeId);
+    if (selected) {
+      event.preventDefault();
+      submitSearch(selected.dataset.query || "");
+    }
+  }
+});
+document.addEventListener("focusin", event => {
+  if (event.target.id === "global-search-input") updateSearchSuggestions(event.target.value);
+});
+document.addEventListener("focusout", event => {
+  if (event.target.id === "global-search-input") {
+    window.setTimeout(() => {
+      if (!document.querySelector("#global-search-suggestions :focus")) closeSearchSuggestions();
+    }, 120);
   }
 });
 renderPage().then(() => {
   if (page === "products") {
-    ["search-products", "filter-category"].forEach(id => document.getElementById(id)?.addEventListener("change", () => {
+    ["search-products", "filter-category", "filter-brand"].forEach(id => document.getElementById(id)?.addEventListener("change", () => {
       const params = new URLSearchParams();
       if (document.getElementById("filter-category").value) params.set("category", document.getElementById("filter-category").value);
+      if (document.getElementById("filter-brand").value) params.set("brand", document.getElementById("filter-brand").value);
       if (document.getElementById("search-products").value) params.set("q", document.getElementById("search-products").value);
+      const sort = document.getElementById("sort-products").value;
+      if (sort !== "relevance") params.set("sort", sort);
       history.replaceState(null, "", `${location.pathname}${params.size ? `?${params}` : ""}`);
     }));
   }

@@ -6,6 +6,7 @@ import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.PrePersist;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -23,6 +24,12 @@ public class Product {
 
     @Column(nullable = false, length = 80)
     private String category;
+
+    @Column(nullable = false, length = 100)
+    private String brand = "ALR Studio";
+
+    @Column(nullable = false, unique = true, length = 100)
+    private String sku;
 
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal price;
@@ -63,12 +70,25 @@ public class Product {
     public Product() {
     }
 
+    @PrePersist
+    private void ensureSku() {
+        if (sku == null || sku.isBlank()) {
+            String prefix = id == null ? "PRODUCT" : id.toUpperCase(java.util.Locale.ROOT);
+            sku = "ALR-" + prefix.substring(0, Math.min(prefix.length(), 84))
+                    + "-" + java.util.UUID.randomUUID().toString().substring(0, 8).toUpperCase(java.util.Locale.ROOT);
+        }
+    }
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
     public String getCategory() { return category; }
     public void setCategory(String category) { this.category = category; }
+    public String getBrand() { return brand; }
+    public void setBrand(String brand) { this.brand = brand; }
+    public String getSku() { return sku; }
+    public void setSku(String sku) { this.sku = sku; }
     public BigDecimal getPrice() { return price; }
     public void setPrice(BigDecimal price) { this.price = price; }
     public BigDecimal getSalePrice() { return salePrice; }

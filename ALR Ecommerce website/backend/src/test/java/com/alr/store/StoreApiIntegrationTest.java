@@ -57,6 +57,10 @@ class StoreApiIntegrationTest {
         ResponseEntity<String> catalog = http.getForEntity("/api/products", String.class);
         assertThat(catalog.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(catalog.getBody()).contains(product.getId());
+        ResponseEntity<ProductResponse[]> searched = http.getForEntity(
+                "/api/products?q=" + product.getSku(), ProductResponse[].class);
+        assertThat(searched.getBody()).hasSize(1);
+        assertThat(searched.getBody()[0].brand()).isEqualTo("ALR Studio");
     }
 
     @Test
@@ -99,11 +103,21 @@ class StoreApiIntegrationTest {
 
         AuthResponse admin = http.postForObject("/api/auth/login",
                 new LoginRequest("admin@test.alr", "admin-test-password-2026"), AuthResponse.class);
+        ResponseEntity<Map> salesBeforeCancellation = http.exchange("/api/admin/summary", HttpMethod.GET,
+                authenticated(admin.accessToken(), null), Map.class);
+        BigDecimal totalSalesBeforeCancellation = new BigDecimal(
+                String.valueOf(salesBeforeCancellation.getBody().get("sales")));
         ResponseEntity<OrderResponse> cancelled = http.exchange(
                 "/api/orders/" + placed.getBody().id() + "/status", HttpMethod.PATCH,
                 authenticated(admin.accessToken(), Map.of("status", "CANCELLED")), OrderResponse.class);
         assertThat(cancelled.getBody().status()).isEqualTo("CANCELLED");
         assertThat(products.findById(product.getId()).orElseThrow().getStock()).isEqualTo(5);
+        ResponseEntity<Map> salesAfterCancellation = http.exchange("/api/admin/summary", HttpMethod.GET,
+                authenticated(admin.accessToken(), null), Map.class);
+        BigDecimal totalSalesAfterCancellation = new BigDecimal(
+                String.valueOf(salesAfterCancellation.getBody().get("sales")));
+        assertThat(totalSalesAfterCancellation)
+                .isEqualByComparingTo(totalSalesBeforeCancellation.subtract(placed.getBody().total()));
     }
 
     @Test
@@ -153,12 +167,14 @@ class StoreApiIntegrationTest {
                 "Admin-created Kurti", "Kurtis", new BigDecimal("2100.00"),
                 null, "A new item.", "https://example.test/kurti.jpg",
                 List.of("https://example.test/kurti-detail.jpg"),
-                List.of("S", "M"), List.of("Ivory"), 7, "New");
+                List.of("S", "M"), List.of("Ivory"), 7, "New", "Test Studio", "TS-KURTI-001");
         ResponseEntity<ProductResponse> created = http.exchange("/api/products", HttpMethod.POST,
                 authenticated(admin.accessToken(), newProduct), ProductResponse.class);
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(created.getBody().stock()).isEqualTo(7);
         assertThat(created.getBody().galleryImages()).containsExactly("https://example.test/kurti-detail.jpg");
+        assertThat(created.getBody().brand()).isEqualTo("Test Studio");
+        assertThat(created.getBody().sku()).isEqualTo("TS-KURTI-001");
 
         ResponseEntity<ProductResponse> outOfStock = http.exchange(
                 "/api/products/" + created.getBody().id() + "/stock", HttpMethod.PATCH,

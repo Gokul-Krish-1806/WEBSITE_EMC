@@ -19,5 +19,7 @@ public record ProductRequest(
         @NotEmpty List<@NotBlank @Size(max = 40) String> sizes,
         @NotEmpty List<@NotBlank @Size(max = 40) String> colors,
         @NotNull Integer stock,
-        @Size(max = 80) String badge) {
+        @Size(max = 80) String badge,
+        @Size(max = 100) String brand,
+        @Size(max = 100) String sku) {
 }
