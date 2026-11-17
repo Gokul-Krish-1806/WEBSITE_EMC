@@ -3,6 +3,7 @@ const CART_KEY = "alr-store-cart";
 const WISHLIST_KEY = "alr-store-wishlist";
 const TOKEN_KEY = "alr-access-token";
 const USER_KEY = "alr-current-user";
+const VIEW_HISTORY_KEY = "alr-product-view-history";
 const FREE_SHIPPING = 4999;
 const SHIPPING_FEE = 149;
 const money = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
@@ -11,6 +12,9 @@ let products = [];
 let orders = [];
 let accountWishlist = new Set();
 let activeToast;
+let announcementTimer;
+let heroTimer;
+let promotionTimer;
 
 function stored(key, fallback, validate) {
   const raw = localStorage.getItem(key);
@@ -33,6 +37,25 @@ function cartItems() {
 
 function wishlistIds() {
   return stored(WISHLIST_KEY, [], value => Array.isArray(value) && value.every(id => typeof id === "string"));
+}
+
+function productViewHistory() {
+  return stored(VIEW_HISTORY_KEY, [], value => Array.isArray(value) && value.every(entry =>
+    entry && typeof entry.id === "string" && Number.isInteger(entry.views) && entry.views > 0
+    && typeof entry.lastViewedAt === "number"));
+}
+
+function rememberProductView(productId) {
+  const history = productViewHistory();
+  const existing = history.find(entry => entry.id === productId);
+  if (existing) {
+    existing.views += 1;
+    existing.lastViewedAt = Date.now();
+  } else {
+    history.push({ id: productId, views: 1, lastViewedAt: Date.now() });
+  }
+  history.sort((a, b) => b.lastViewedAt - a.lastViewedAt);
+  localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(history.slice(0, 20)));
 }
 
 function setCart(items) {
@@ -110,7 +133,7 @@ function showToast(message) {
 function headerMarkup() {
   const count = cartItems().reduce((total, item) => total + item.quantity, 0);
   const savedUser = user();
-  return `<div class="announcement"><span>Complimentary shipping over ₹4,999</span><a href="/pages/products.html">Discover the new season →</a></div>
+  return `<div class="announcement" data-announcement-rotator><a id="announcement-link" href="/pages/products.html" aria-live="polite"><span id="announcement-message">Complimentary shipping over ₹4,999</span></a><span class="announcement-index" id="announcement-index"></span></div>
     <header class="site-header"><div class="header-inner">
       <button class="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
       <a class="brand" href="/" aria-label="ALR home">ALR<span>.</span></a>
@@ -140,13 +163,14 @@ function footerMarkup() {
 
 function productCard(product) {
   const wished = token() ? accountWishlist.has(product.id) : wishlistIds().includes(product.id);
-  return `<article class="product-card"><div class="product-picture">
+  const outOfStock = product.stock <= 0;
+  return `<article class="product-card${outOfStock ? " is-out-of-stock" : ""}"><div class="product-picture">
     <a href="/pages/product-details.html?id=${encodeURIComponent(product.id)}" aria-label="View ${escapeHtml(product.name)}"><img src="${escapeHtml(product.imageUrl)}" alt="${escapeHtml(product.name)}" loading="lazy"></a>
-    ${product.badge ? `<span class="product-badge">${escapeHtml(product.badge)}</span>` : ""}
+    ${outOfStock ? `<span class="product-badge out-of-stock-badge">Out of stock</span>` : product.badge ? `<span class="product-badge">${escapeHtml(product.badge)}</span>` : ""}
     <button class="heart-button" type="button" data-action="wishlist" data-id="${escapeHtml(product.id)}" aria-label="Toggle ${escapeHtml(product.name)} wishlist" aria-pressed="${wished}">♡</button>
     <div class="product-actions"><button type="button" data-action="details" data-id="${escapeHtml(product.id)}">Quick view</button><button type="button" data-action="details" data-id="${escapeHtml(product.id)}">Choose options</button></div>
   </div><div class="product-meta"><div><h3 class="product-name"><a href="/pages/product-details.html?id=${encodeURIComponent(product.id)}">${escapeHtml(product.name)}</a></h3>
-    <p class="product-type">${escapeHtml(product.category)}</p><span class="product-stock">${product.stock > 0 ? `${product.stock} ready to ship` : "Currently unavailable"}</span></div>
+    <p class="product-type">${escapeHtml(product.category)}</p><span class="product-stock${outOfStock ? " is-out-of-stock" : ""}">${outOfStock ? "Out of stock" : `${product.stock} ready to ship`}</span></div>
     <p class="product-price">${product.salePrice ? `<del>${money.format(product.price)}</del>` : ""}${money.format(price(product))}</p></div></article>`;
 }
 
@@ -154,7 +178,109 @@ function sectionTitle(label, title, link = "/pages/products.html") {
   return `<div class="section-heading"><div><span class="eyebrow">${escapeHtml(label)}</span><h2>${escapeHtml(title)}</h2></div><a class="text-link" href="${link}">View collection →</a></div>`;
 }
 
-function renderHome() {
+function homepageProductSection(label, title, list, link, note = "") {
+  if (!list.length) return "";
+  return `<section class="section">${sectionTitle(label, title, link)}${note ? `<p class="form-help">${escapeHtml(note)}</p>` : ""}<div class="product-grid">${list.slice(0, 4).map(productCard).join("")}</div></section>`;
+}
+
+function startHomepageFeatures() {
+  clearInterval(announcementTimer);
+  clearInterval(heroTimer);
+  clearInterval(promotionTimer);
+  const announcements = [
+    ["Complimentary shipping on orders over ₹4,999", "/pages/products.html"],
+    ["Cash on delivery is available", "/pages/products.html"],
+    ["Discover the new ALR season", "/pages/products.html"]
+  ];
+  let announcementIndex = 0;
+  const updateAnnouncement = () => {
+    const message = document.getElementById("announcement-message");
+    const link = document.getElementById("announcement-link");
+    const index = document.getElementById("announcement-index");
+    if (!message || !link || !index) return;
+    message.textContent = announcements[announcementIndex][0];
+    link.href = announcements[announcementIndex][1];
+    index.textContent = `${announcementIndex + 1} / ${announcements.length}`;
+  };
+  updateAnnouncement();
+
+  const slides = [...document.querySelectorAll("[data-hero-slide]")];
+  let activeSlide = 0;
+  const showSlide = next => {
+    if (!slides.length) return;
+    activeSlide = (next + slides.length) % slides.length;
+    slides.forEach((slide, index) => {
+      slide.classList.toggle("is-active", index === activeSlide);
+      slide.setAttribute("aria-hidden", String(index !== activeSlide));
+    });
+    document.querySelectorAll(".hero-dot").forEach((dot, index) => {
+      dot.classList.toggle("is-active", index === activeSlide);
+      dot.setAttribute("aria-pressed", String(index === activeSlide));
+    });
+  };
+  document.querySelectorAll(".hero-dot").forEach((dot, index) => {
+    dot.addEventListener("click", () => showSlide(index));
+  });
+  document.querySelector('[data-action="hero-previous"]')?.addEventListener("click", () => showSlide(activeSlide - 1));
+  document.querySelector('[data-action="hero-next"]')?.addEventListener("click", () => showSlide(activeSlide + 1));
+
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    announcementTimer = setInterval(() => {
+      announcementIndex = (announcementIndex + 1) % announcements.length;
+      updateAnnouncement();
+    }, 5000);
+    if (slides.length > 1) heroTimer = setInterval(() => showSlide(activeSlide + 1), 6500);
+  }
+
+  loadHomepagePromotion();
+}
+
+async function loadHomepagePromotion() {
+  try {
+    const promotion = await api("/storefront/promotion");
+    const section = document.getElementById("homepage-promotion");
+    const message = document.getElementById("promotion-message");
+    const countdown = document.getElementById("promotion-countdown");
+    if (!promotion.active || !section || !message || !countdown) return;
+    const endsAt = Date.parse(promotion.endsAt);
+    if (!Number.isFinite(endsAt) || endsAt <= Date.now()) {
+      throw new Error("The configured promotion expiry is invalid or has passed.");
+    }
+    message.textContent = promotion.message;
+    section.hidden = false;
+    const updateCountdown = () => {
+      const remaining = Math.max(0, endsAt - Date.now());
+      const days = Math.floor(remaining / 86400000);
+      const hours = Math.floor((remaining % 86400000) / 3600000);
+      const minutes = Math.floor((remaining % 3600000) / 60000);
+      const seconds = Math.floor((remaining % 60000) / 1000);
+      countdown.textContent = `${days}d ${hours}h ${minutes}m ${seconds}s`;
+      if (remaining === 0) {
+        clearInterval(promotionTimer);
+        countdown.textContent = "This offer has ended.";
+      }
+    };
+    updateCountdown();
+    promotionTimer = setInterval(updateCountdown, 1000);
+  } catch (error) {
+    console.error("Could not load the configured homepage promotion.", error);
+    showToast(`Homepage promotion couldn't load: ${error.message}`);
+  }
+}
+
+function renderHeroCarousel() {
+  const slides = [
+    ["The new season · ALR Studio", "Made for your moments.", "Indian craft, thoughtful details, and pieces that feel like you—wherever the day takes you.", "/pages/products.html", "Shop the collection", "photo-1610030469983-98e550d6193c"],
+    ["Woven with a story", "A saree, your way.", "Discover considered drapes inspired by India's rich weaving traditions.", "/pages/products.html?category=Sarees", "Explore sarees", "photo-1594633312681-425c7b97ccd1"],
+    ["Easy does it", "Everyday, elevated.", "Thoughtful kurtis and relaxed silhouettes for all the little moments.", "/pages/products.html?category=Kurtis", "Find your edit", "photo-1598033129183-c4f50c736f10"]
+  ];
+  return `<section class="hero" aria-roledescription="carousel" aria-label="ALR seasonal collections">
+    ${slides.map(([eyebrow, title, description, href, label, photo], index) => `<article class="hero-slide${index === 0 ? " is-active" : ""}" data-hero-slide="${index}" aria-hidden="${index !== 0}" style="--hero-image:url('https://images.unsplash.com/${photo}?auto=format&fit=crop&w=2000&q=88')"><div class="hero-content"><span class="eyebrow">${escapeHtml(eyebrow)}</span><h1>${escapeHtml(title)}</h1><p>${escapeHtml(description)}</p><div class="button-row"><a class="button button-light" href="${href}">${escapeHtml(label)} <span>→</span></a><a class="button button-outline" href="#story">Our story</a></div></div></article>`).join("")}
+    <div class="hero-controls"><button class="hero-arrow" type="button" data-action="hero-previous" aria-label="Previous collection">←</button><div class="hero-dots">${slides.map((_, index) => `<button class="hero-dot${index === 0 ? " is-active" : ""}" type="button" data-action="hero-slide" data-slide="${index}" aria-label="Show collection ${index + 1}" aria-pressed="${index === 0}"></button>`).join("")}</div><button class="hero-arrow" type="button" data-action="hero-next" aria-label="Next collection">→</button></div>
+  </section>`;
+}
+
+async function renderHome() {
   const categories = [
     ["Sarees", "photo-1610030469983-98e550d6193c"], ["Kurtis", "photo-1598033129183-c4f50c736f10"],
     ["Short kurtis", "photo-1591047139829-d91aecb6caea"], ["Maxi dresses", "photo-1597983073493-88cd35cf93b0"],
@@ -162,27 +288,81 @@ function renderHome() {
     ["Co-ord sets", "photo-1617627143750-d86bc21e42bb"], ["Partywear", "photo-1594633312681-425c7b97ccd1"],
     ["Jewellery", "photo-1617038220319-276d3cfab638"]
   ];
-  return `<section class="hero"><div class="hero-content"><span class="eyebrow">The new season · ALR Studio</span><h1>Made for your moments.</h1><p>Indian craft, thoughtful details, and pieces that feel like you—wherever the day takes you.</p><div class="button-row"><a class="button button-light" href="/pages/products.html">Shop collection <span>→</span></a><a class="button button-outline" href="#story">Our story</a></div></div></section>
-    <section class="section">${sectionTitle("Find your feeling", "Shop by category")}<div class="category-grid">${categories.map(([name, photo]) => `<a class="category-card" href="/pages/products.html?category=${encodeURIComponent(name)}"><img src="https://images.unsplash.com/${photo}?auto=format&fit=crop&w=700&q=80" alt="" loading="lazy"><span>${escapeHtml(name)}</span></a>`).join("")}</div></section>
+  const history = productViewHistory();
+  const viewedIds = history.map(entry => entry.id);
+  const viewedProducts = viewedIds.map(id => products.find(product => product.id === id)).filter(Boolean);
+  const popularForYou = [...history].sort((a, b) => b.views - a.views || b.lastViewedAt - a.lastViewedAt)
+    .map(entry => products.find(product => product.id === entry.id)).filter(Boolean);
+  const newest = [...products].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const bestSellers = [...products].filter(product => (product.salesCount || 0) > 0)
+    .sort((a, b) => (b.salesCount || 0) - (a.salesCount || 0));
+  const saleProducts = [...products].filter(product => product.salePrice && Number(product.salePrice) < Number(product.price))
+    .sort((a, b) => (Number(a.salePrice) / Number(a.price)) - (Number(b.salePrice) / Number(b.price)));
+  const savedIds = token() ? [...accountWishlist] : wishlistIds();
+  const savedProducts = savedIds.map(id => products.find(product => product.id === id)).filter(Boolean);
+  const affinityProducts = [...viewedProducts, ...savedProducts];
+  const categoryAffinity = affinityProducts.reduce((counts, product) => {
+    counts[product.category] = (counts[product.category] || 0) + 1;
+    return counts;
+  }, {});
+  const preferredCategory = Object.entries(categoryAffinity).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const recommendations = preferredCategory
+    ? products.filter(product => product.category === preferredCategory
+      && !savedIds.includes(product.id) && !viewedIds.includes(product.id)).slice(0, 4)
+    : [];
+  let trendingProducts = [];
+  try {
+    trendingProducts = await api("/storefront/trending");
+  } catch (error) {
+    console.error("Could not load recently trending products.", error);
+    showToast(`Trending products couldn't load: ${error.message}`);
+  }
+  let purchasedProducts = [];
+  if (token()) {
+    try {
+      const customerOrders = await api("/orders/mine");
+      const purchasedIds = [...new Set(customerOrders
+        .filter(order => order.status !== "CANCELLED")
+        .flatMap(order => order.items.map(item => item.productId)))];
+      purchasedProducts = purchasedIds.map(id => products.find(product => product.id === id)).filter(Boolean);
+    } catch (error) {
+      console.error("Could not load recently purchased homepage recommendations.", error);
+      showToast(`Your recent purchases couldn't load: ${error.message}`);
+    }
+  }
+  return `${renderHeroCarousel()}
+    <section class="section" id="seasonal-collections">${sectionTitle("The season, considered", "Explore the collection edits")}<div class="category-grid">${categories.map(([name, photo]) => `<a class="category-card" href="/pages/products.html?category=${encodeURIComponent(name)}"><img src="https://images.unsplash.com/${photo}?auto=format&fit=crop&w=700&q=80" alt="${escapeHtml(name)} collection" loading="lazy"><span>${escapeHtml(name)}</span></a>`).join("")}</div></section>
+  ${homepageProductSection("Purchased in the last 30 days", "Trending now", trendingProducts, "/pages/products.html", "Ranked from non-cancelled order quantities in the last 30 days.")}
+    ${homepageProductSection("Chosen by ALR customers", "Best sellers", bestSellers, "/pages/products.html?sort=best-selling", "Ranked using completed, non-cancelled order quantities.")}
+    ${homepageProductSection("A fresh point of view", "Recently added", newest, "/pages/products.html?sort=newest")}
+    ${homepageProductSection("A little something for later", "Your saved pieces", savedProducts, "/pages/wishlist.html")}
+    ${homepageProductSection("A familiar favourite", "Recently viewed", viewedProducts, "/pages/products.html", "Stored only in this browser on this device.")}
+    ${homepageProductSection("Most viewed on this device", "Most viewed by you", popularForYou, "/pages/products.html", "View counts are private to this browser and are not shared with ALR.")}
+    ${homepageProductSection("Picked from your interests", "A few more to love", recommendations, preferredCategory ? `/pages/products.html?category=${encodeURIComponent(preferredCategory)}` : "/pages/products.html", "Simple recommendations based on categories you viewed or saved; not AI-generated.")}
+    ${homepageProductSection("Welcome back", "Recently purchased", purchasedProducts, "/pages/orders.html", "From your completed account order history.")}
+    ${homepageProductSection("Seasonal highlights", "Special prices", saleProducts, "/pages/products.html", "Current catalogue sale prices; availability is checked at checkout.")}
     <section class="section">${sectionTitle("Woven with a story", "The saree collection", "/pages/products.html?category=Sarees")}<div class="saree-links">${[
       ["Kanchipuram silk", "kanchipuram"], ["Semi silk", "semi"], ["Soft silk", "soft"], ["Sungudi", "sungudi"], ["Maheshwari silk cotton", "maheshwari"], ["Bridal sarees", "bridal"]
     ].map(([label, query]) => `<a href="/pages/products.html?category=Sarees&q=${query}"><span>${escapeHtml(label)}</span><span aria-hidden="true">→</span></a>`).join("")}</div></section>
     <section class="story" id="story"><div class="story-image" role="img" aria-label="A look from the ALR collection"></div><div class="story-copy"><span class="eyebrow">A little about us</span><h2>Rooted in craft.<br>Made for now.</h2><p>We believe the things we wear should carry a little meaning. ALR brings Indian-inspired textiles, considered silhouettes and everyday ease together, for every version of your day.</p><a class="button button-dark" href="/pages/products.html">Discover ALR →</a></div></section>
-    <section class="section" id="favourites">${sectionTitle("Thoughtfully chosen", "Our favourite picks")}<div class="product-grid">${products.slice(0, 4).map(productCard).join("")}</div></section>
-    <section class="section">${sectionTitle("Just arrived", "The new edit")}<div class="product-grid">${[...products].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 4).map(productCard).join("")}</div></section>
     <section class="promo"><span class="eyebrow">For every celebration</span><h2>Wear the moments that matter.</h2><p>Find something lovely for your next little (or big) occasion.</p><a class="button button-light" href="/pages/products.html?category=Partywear">Explore occasionwear →</a></section>
+    <section class="promo-countdown" id="homepage-promotion" hidden aria-live="polite"><div><span class="eyebrow">A little time, a lovely offer</span><h2 id="promotion-message"></h2></div><div class="countdown-clock" id="promotion-countdown" aria-label="Promotion time remaining"></div></section>
     <section class="section"><div class="section-heading"><div><span class="eyebrow">A note from our community</span><h2>Kind words, kindly worn</h2></div></div><div class="reviews"><article class="review"><span class="review-stars">★★★★★</span><p>“Beautifully finished, and the colour is even lovelier in person. I felt completely at home in it.”</p><strong>Sample review · Gulmohar Silk Saree</strong></article><article class="review"><span class="review-stars">★★★★★</span><p>“The fit is so comfortable and the details are thoughtful. Already planning what to wear it with next.”</p><strong>Sample review · Noor Embroidered Kurti</strong></article><article class="review"><span class="review-stars">★★★★★</span><p>“A lovely set that feels special without trying too hard. It arrived beautifully packed, too.”</p><strong>Sample review · Meher Co-ord Set</strong></article></div><p class="form-help">Reviews shown are illustrative samples, not verified customer submissions.</p></section>
     <section class="section instagram-section"><div class="section-heading"><div><span class="eyebrow">Follow our style</span><h2>A little ALR, out in the world</h2></div><a class="text-link" href="https://www.instagram.com/" target="_blank" rel="noreferrer">Find us on Instagram ↗</a></div><div class="instagram-grid">${["photo-1610030469983-98e550d6193c", "photo-1598033129183-c4f50c736f10", "photo-1617627143750-d86bc21e42bb", "photo-1597983073493-88cd35cf93b0"].map((photo, index) => `<a href="https://www.instagram.com/" target="_blank" rel="noreferrer" aria-label="ALR style inspiration ${index + 1}"><img src="https://images.unsplash.com/${photo}?auto=format&fit=crop&w=600&q=80" alt="" loading="lazy"></a>`).join("")}</div><p class="form-help">Editorial inspiration from the ALR collection.</p></section>
-    <section class="newsletter"><span class="eyebrow">The ALR letter</span><h2>A little loveliness in your inbox.</h2><p>New collections, thoughtful stories, and notes from the studio.</p><form class="newsletter-form" id="newsletter-form"><label class="sr-only" for="newsletter-email">Email address</label><input id="newsletter-email" name="email" type="email" placeholder="Your email address" required maxlength="254"><button class="button button-dark" type="submit">Subscribe →</button></form></section>`;
+    <section class="newsletter"><span class="eyebrow">The ALR letter</span><h2>A little loveliness in your inbox.</h2><p>New collections, thoughtful stories, and notes from the studio.</p><form class="newsletter-form" id="newsletter-form"><label class="sr-only" for="newsletter-email">Email address</label><input id="newsletter-email" name="email" type="email" placeholder="Your email address" required maxlength="254"><button class="button button-dark" type="submit">Subscribe →</button></form></section>
+    <a class="whatsapp-support" href="https://wa.me/?text=Hello%20ALR%2C%20I%20need%20help%20with%20your%20store." target="_blank" rel="noreferrer" aria-label="Contact ALR on WhatsApp"><span aria-hidden="true">◉</span><span class="whatsapp-label">Chat with us</span></a>`;
 }
 
 function renderProducts() {
   const category = new URLSearchParams(location.search).get("category") || "";
   const query = new URLSearchParams(location.search).get("q") || "";
+  const requestedSort = new URLSearchParams(location.search).get("sort") || "";
+  const sort = ["featured", "newest", "low", "high", "best-selling"].includes(requestedSort)
+    ? requestedSort : "featured";
   const categories = [...new Set(products.map(product => product.category))].sort();
   const colors = [...new Set(products.flatMap(product => product.colors))].sort();
   return `<section class="page-shell"><p class="breadcrumb"><a href="/">Home</a> / The collection</p><div class="page-heading"><span class="eyebrow">Considered pieces, made to be worn</span><h1>Shop the collection</h1><p>Discover the pieces that make every day feel a little more like your own.</p></div>
-    <div class="filter-bar"><label class="sr-only" for="search-products">Search products</label><input id="search-products" type="search" placeholder="Search by name or category…" value="${escapeHtml(query)}"><select id="filter-category" aria-label="Category"><option value="">All categories</option>${categories.map(item => `<option value="${escapeHtml(item)}" ${item.toLowerCase() === category.toLowerCase() ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}</select><select id="filter-size" aria-label="Size"><option value="">All sizes</option>${["XS", "S", "M", "L", "XL", "XXL", "Free size", "One size"].map(size => `<option>${size}</option>`).join("")}</select><select id="filter-color" aria-label="Colour"><option value="">All colours</option>${colors.map(color => `<option value="${escapeHtml(color)}">${escapeHtml(color)}</option>`).join("")}</select><input id="filter-price-min" type="number" min="0" placeholder="Min ₹" aria-label="Minimum price"><input id="filter-price-max" type="number" min="0" placeholder="Max ₹" aria-label="Maximum price"><select id="sort-products" aria-label="Sort products"><option value="featured">Featured</option><option value="newest">Newest</option><option value="low">Price: low to high</option><option value="high">Price: high to low</option><option value="best-selling">Best selling</option></select><label class="icon-link"><input id="filter-available" type="checkbox"> In stock</label></div>
+    <div class="filter-bar"><label class="sr-only" for="search-products">Search products</label><input id="search-products" type="search" placeholder="Search by name or category…" value="${escapeHtml(query)}"><select id="filter-category" aria-label="Category"><option value="">All categories</option>${categories.map(item => `<option value="${escapeHtml(item)}" ${item.toLowerCase() === category.toLowerCase() ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}</select><select id="filter-size" aria-label="Size"><option value="">All sizes</option>${["XS", "S", "M", "L", "XL", "XXL", "Free size", "One size"].map(size => `<option>${size}</option>`).join("")}</select><select id="filter-color" aria-label="Colour"><option value="">All colours</option>${colors.map(color => `<option value="${escapeHtml(color)}">${escapeHtml(color)}</option>`).join("")}</select><input id="filter-price-min" type="number" min="0" placeholder="Min ₹" aria-label="Minimum price"><input id="filter-price-max" type="number" min="0" placeholder="Max ₹" aria-label="Maximum price"><select id="sort-products" aria-label="Sort products"><option value="featured" ${sort === "featured" ? "selected" : ""}>Featured</option><option value="newest" ${sort === "newest" ? "selected" : ""}>Newest</option><option value="low" ${sort === "low" ? "selected" : ""}>Price: low to high</option><option value="high" ${sort === "high" ? "selected" : ""}>Price: high to low</option><option value="best-selling" ${sort === "best-selling" ? "selected" : ""}>Best selling</option></select><label class="icon-link"><input id="filter-available" type="checkbox"> In stock</label></div>
     <p id="products-count" class="form-help"></p><div class="product-grid" id="products-grid"></div></section>`;
 }
 
@@ -224,7 +404,7 @@ function renderDetail(product) {
   const thumbnails = gallery.length > 1 ? `<div class="detail-thumbnails">${gallery.map((image, index) => `<button type="button" data-action="select-image" data-image="${escapeHtml(image)}" aria-label="View product image ${index + 1}"><img src="${escapeHtml(image)}" alt=""></button>`).join("")}</div>` : "";
   return `<section class="page-shell"><p class="breadcrumb"><a href="/">Home</a> / <a href="/pages/products.html">The collection</a> / ${escapeHtml(product.name)}</p><div class="product-detail">
     <div><img class="detail-image" id="detail-main-image" src="${escapeHtml(product.imageUrl)}" alt="${escapeHtml(product.name)}">${thumbnails}</div>
-    <div class="detail-copy"><span class="eyebrow">${escapeHtml(product.category)}</span><h1>${escapeHtml(product.name)}</h1><p class="detail-price">${product.salePrice ? `<del>${money.format(product.price)}</del> ` : ""}${money.format(price(product))}</p><p>${escapeHtml(product.description)}</p><p class="product-stock">${product.stock > 0 ? `${product.stock} ready to ship` : "Currently unavailable"}</p>${options}
+    <div class="detail-copy"><span class="eyebrow">${escapeHtml(product.category)}</span><h1>${escapeHtml(product.name)}</h1><p class="detail-price">${product.salePrice ? `<del>${money.format(product.price)}</del> ` : ""}${money.format(price(product))}</p><p>${escapeHtml(product.description)}</p><p class="product-stock${product.stock <= 0 ? " is-out-of-stock" : ""}">${product.stock > 0 ? `${product.stock} ready to ship` : "Out of stock"}</p>${options}
       <div class="choice-row"><label for="detail-quantity">Quantity</label><input class="field quantity-input" id="detail-quantity" type="number" min="1" max="${Math.max(1, product.stock)}" value="1"></div>
       <div class="button-row"><button class="button button-dark" type="button" data-action="add-cart" data-id="${escapeHtml(product.id)}" ${product.stock <= 0 ? "disabled" : ""}>Add to bag</button><button class="button button-outline" type="button" data-action="buy-now" data-id="${escapeHtml(product.id)}" ${product.stock <= 0 ? "disabled" : ""}>Buy now</button><button class="button button-outline" type="button" data-action="wishlist" data-id="${escapeHtml(product.id)}">♡ Save</button></div>
       <div class="admin-section"><h2>A little more</h2><p>${escapeHtml(product.description)}</p><p>Made with care. Follow the care label for the fabric. Complimentary shipping over ₹4,999. Cash on delivery available.</p><details><summary>Size guide</summary><p>Choose your usual size for a comfortable fit. Sarees and one-size accessories are labelled accordingly.</p></details><details><summary>Shipping and returns</summary><p>Complimentary shipping over ₹4,999. Eligible unworn items can be returned within 7 days of delivery.</p></details></div></div></div></section>
@@ -317,7 +497,7 @@ function renderOrderHistory(list) {
 }
 
 function adminMarkup(productList, orderList, stats, customerList) {
-  const productRows = productList.map(product => `<tr><td><img src="${escapeHtml(product.imageUrl)}" alt=""></td><td>${escapeHtml(product.name)}</td><td>${escapeHtml(product.category)}</td><td>${money.format(product.price)}</td><td>${product.stock}</td><td><button class="button button-outline" type="button" data-action="edit-product" data-id="${escapeHtml(product.id)}">Edit</button> <button class="text-button" type="button" data-action="delete-product" data-id="${escapeHtml(product.id)}">Remove</button></td></tr>`).join("");
+  const productRows = productList.map(product => `<tr><td><img src="${escapeHtml(product.imageUrl)}" alt=""></td><td>${escapeHtml(product.name)}</td><td>${escapeHtml(product.category)}</td><td>${money.format(product.price)}</td><td>${product.stock > 0 ? product.stock : "Out of stock"}</td><td><button class="button button-outline" type="button" data-action="edit-product" data-id="${escapeHtml(product.id)}">Edit</button> ${product.stock > 0 ? `<button class="text-button" type="button" data-action="mark-out-of-stock" data-id="${escapeHtml(product.id)}">Mark out of stock</button>` : ""} <button class="text-button" type="button" data-action="delete-product" data-id="${escapeHtml(product.id)}">Remove</button></td></tr>`).join("");
   const nextStatuses = { PLACED: ["PLACED", "CONFIRMED", "CANCELLED"], CONFIRMED: ["CONFIRMED", "SHIPPED", "CANCELLED"], SHIPPED: ["SHIPPED", "DELIVERED"], DELIVERED: ["DELIVERED"], CANCELLED: ["CANCELLED"] };
   const orderRows = orderList.map(order => `<tr><td>${escapeHtml(order.orderNumber)}</td><td>${escapeHtml(order.customerName)}<br>${escapeHtml(order.customerEmail)}</td><td>${money.format(order.total)}</td><td>${escapeHtml(order.status)}</td><td><select class="field" data-order-status="${order.id}">${(nextStatuses[order.status] || [order.status]).map(status => `<option ${status === order.status ? "selected" : ""}>${status}</option>`).join("")}</select><button class="text-button" type="button" data-action="update-order" data-id="${order.id}">Update</button></td></tr>`).join("");
   const customerRows = customerList.map(customer => `<tr><td>${escapeHtml(customer.name)}</td><td>${escapeHtml(customer.email)}</td><td>${escapeHtml(customer.phone || "—")}</td><td>${customer.orderCount}</td><td><button class="text-button" type="button" data-action="customer-history" data-id="${customer.id}">View history</button></td></tr>`).join("");
@@ -376,7 +556,10 @@ async function renderPage() {
     }
     updateCounts();
     switch (page) {
-      case "home": app.innerHTML = renderHome(); break;
+      case "home":
+        app.innerHTML = await renderHome();
+        startHomepageFeatures();
+        break;
       case "products":
         app.innerHTML = renderProducts();
         applyProductFilters();
@@ -384,6 +567,7 @@ async function renderPage() {
       case "detail": {
         const id = new URLSearchParams(location.search).get("id");
         const product = products.find(entry => entry.id === id);
+        if (product) rememberProductView(product.id);
         app.innerHTML = product ? renderDetail(product) : `<section class="page-shell"><div class="empty-state"><h2>We couldn't find that piece.</h2><a class="button button-dark" href="/pages/products.html">Browse the collection →</a></div></section>`;
         break;
       }
@@ -525,6 +709,13 @@ async function handleClick(event) {
       await api(`/products/${encodeURIComponent(product.id)}`, { method: "DELETE" });
       showToast("Product removed from the catalogue.");
       await renderPage();
+    }
+    if (action === "mark-out-of-stock" && product && product.stock > 0) {
+      await api(`/products/${encodeURIComponent(product.id)}/stock`, {
+        method: "PATCH", body: JSON.stringify({ stock: 0 })
+      });
+      showToast(`${product.name} is now marked out of stock for customers.`);
+      await renderAdminData();
     }
     if (action === "update-order") {
       const status = document.querySelector(`[data-order-status="${button.dataset.id}"]`).value;

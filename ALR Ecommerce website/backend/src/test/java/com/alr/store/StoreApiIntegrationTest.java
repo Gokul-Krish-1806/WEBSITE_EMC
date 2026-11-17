@@ -40,6 +40,12 @@ class StoreApiIntegrationTest {
         ResponseEntity<String> health = http.getForEntity("/api/health", String.class);
         assertThat(health.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(health.getBody()).contains("\"status\":\"ok\"");
+        ResponseEntity<String> trending = http.getForEntity("/api/storefront/trending", String.class);
+        assertThat(trending.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(trending.getBody()).isEqualTo("[]");
+        ResponseEntity<String> promotion = http.getForEntity("/api/storefront/promotion", String.class);
+        assertThat(promotion.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(promotion.getBody()).contains("\"active\":false");
         ResponseEntity<String> homepage = http.getForEntity("/", String.class);
         assertThat(homepage.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(homepage.getBody()).contains("ALR — Made for your moments");
@@ -82,6 +88,9 @@ class StoreApiIntegrationTest {
         assertThat(placed.getBody().shipping()).isEqualByComparingTo("149.00");
         assertThat(placed.getBody().total()).isEqualByComparingTo("2549.00");
         assertThat(products.findById(product.getId()).orElseThrow().getStock()).isEqualTo(3);
+        ResponseEntity<String> trending = http.getForEntity("/api/storefront/trending", String.class);
+        assertThat(trending.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(trending.getBody()).contains(product.getId()).contains("\"salesCount\":2");
 
         ResponseEntity<String> customerOrders = http.exchange("/api/orders/mine", HttpMethod.GET,
                 authenticated(customerToken, null), String.class);
@@ -150,6 +159,22 @@ class StoreApiIntegrationTest {
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(created.getBody().stock()).isEqualTo(7);
         assertThat(created.getBody().galleryImages()).containsExactly("https://example.test/kurti-detail.jpg");
+
+        ResponseEntity<ProductResponse> outOfStock = http.exchange(
+                "/api/products/" + created.getBody().id() + "/stock", HttpMethod.PATCH,
+                authenticated(admin.accessToken(), Map.of("stock", 0)), ProductResponse.class);
+        assertThat(outOfStock.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(outOfStock.getBody().stock()).isZero();
+        ResponseEntity<ProductResponse> customerProduct = http.getForEntity(
+                "/api/products/" + created.getBody().id(), ProductResponse.class);
+        assertThat(customerProduct.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(customerProduct.getBody().stock()).isZero();
+        assertThat(customerProduct.getBody().active()).isTrue();
+
+        ResponseEntity<String> forbiddenStockUpdate = http.exchange(
+                "/api/products/" + created.getBody().id() + "/stock", HttpMethod.PATCH,
+                authenticated(customer.accessToken(), Map.of("stock", 5)), String.class);
+        assertThat(forbiddenStockUpdate.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
 
         ResponseEntity<Void> removed = http.exchange("/api/products/" + created.getBody().id(),
                 HttpMethod.DELETE, authenticated(admin.accessToken(), null), Void.class);

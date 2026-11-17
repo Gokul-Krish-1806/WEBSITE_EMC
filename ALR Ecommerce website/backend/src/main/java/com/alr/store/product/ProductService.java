@@ -4,6 +4,7 @@ import com.alr.store.order.OrderLineRepository;
 import com.alr.store.order.ProductSales;
 import jakarta.persistence.EntityNotFoundException;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -45,6 +46,18 @@ public class ProductService {
         return ProductResponse.from(product, salesCounts().getOrDefault(product.getId(), 0L));
     }
 
+    @Transactional(readOnly = true)
+    public List<ProductResponse> trending(Instant since) {
+        Map<String, Long> sales = orderLines.findProductSalesSince(since).stream().collect(Collectors.toMap(
+                ProductSales::getProductId, ProductSales::getQuantity, Long::sum));
+        return products.findAllByActiveTrueOrderByCreatedAtDesc().stream()
+                .filter(product -> sales.containsKey(product.getId()))
+                .sorted(Comparator.comparingLong((Product product) -> sales.get(product.getId())).reversed())
+                .limit(8)
+                .map(product -> ProductResponse.from(product, sales.get(product.getId())))
+                .toList();
+    }
+
     @Transactional
     public ProductResponse create(ProductRequest request) {
         validatePrice(request);
@@ -63,6 +76,17 @@ public class ProductService {
                 .orElseThrow(() -> new EntityNotFoundException("Product was not found."));
         copy(request, product);
         return ProductResponse.from(product);
+    }
+
+    @Transactional
+    public ProductResponse updateStock(String id, int stock) {
+        if (stock < 0) {
+            throw new IllegalArgumentException("Stock cannot be negative.");
+        }
+        Product product = products.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Product was not found."));
+        product.setStock(stock);
+        return ProductResponse.from(product, salesCounts().getOrDefault(product.getId(), 0L));
     }
 
     @Transactional
