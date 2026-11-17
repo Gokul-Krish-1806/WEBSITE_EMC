@@ -1,0 +1,2 @@
+ALTER TABLE products
+    ADD COLUMN gallery_images VARCHAR(3000) NOT NULL DEFAULT '';
